@@ -13,11 +13,26 @@ export async function analyzeClinicalQuestion(query: string, clarificationAnswer
   // 2. Get LLM response
   const rawOutput = await provider.generate(finalPrompt);
 
-  // 3. Defensive Cleaning
-  const stringOutput = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput);
-  const cleanedOutput = stringOutput.replace(/```json/g, "").replace(/```/g, "").trim();
+  // 3. DEFENSIVE STRING CONVERSION
+  // This explicitly handles cases where the provider might return an object 
+  // instead of a raw string, preventing the "replace is not a function" error.
+  let stringOutput: string;
+  
+  if (typeof rawOutput === 'string') {
+    stringOutput = rawOutput;
+  } else if (rawOutput !== null && typeof rawOutput === 'object') {
+    stringOutput = JSON.stringify(rawOutput);
+  } else {
+    stringOutput = String(rawOutput || "");
+  }
 
-  // 4. Parse JSON safely
+  // 4. Clean formatting
+  const cleanedOutput = stringOutput
+    .replace(/```json/g, "")
+    .replace(/```/g, "")
+    .trim();
+
+  // 5. Parse JSON safely
   let parsed;
   try {
     parsed = JSON.parse(cleanedOutput);
@@ -25,15 +40,15 @@ export async function analyzeClinicalQuestion(query: string, clarificationAnswer
     throw new Error("LLM failed to return valid JSON. Output received: " + cleanedOutput);
   }
 
-  // 5. Strict Structure Check (The "No Undefined" Safety Gate)
+  // 6. Strict Structure Check
   if (!parsed.draft_peo || !parsed.draft_peo.patient) {
-    throw new Error("LLM output missing 'draft_peo' structure. Check prompts.ts schema consistency.");
+    throw new Error("LLM returned JSON missing 'draft_peo' or 'patient' structure. Output: " + cleanedOutput);
   }
 
-  // 6. Calculate Readiness
+  // 7. Calculate Readiness
   const { score, missing } = calculateReadiness(parsed.draft_peo);
 
-  // 7. Logic Gate
+  // 8. Logic Gate
   let final_peo = null;
   let pubmed_queries = null;
 
@@ -56,7 +71,6 @@ export async function analyzeClinicalQuestion(query: string, clarificationAnswer
 // --- HELPER FUNCTIONS ---
 
 async function generatePubMedQueries(peo: any, type: string) {
-  // Use optional chaining for safety
   const drug = peo.exposure?.required?.drug || "";
   const cond = peo.patient?.required?.condition || "";
   const out = peo.outcome?.required?.primary || "";
