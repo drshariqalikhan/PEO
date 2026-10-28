@@ -1,7 +1,6 @@
-// Define the PEO schema as a "Tool" for Gemini
 export const PEO_TOOL = {
   name: "extract_peo",
-  description: "Extract PEO data and identify missing clinical parameters.",
+  description: "Extract PEO data and identify missing clinical parameters from the registry keys.",
   parameters: {
     type: "OBJECT",
     properties: {
@@ -17,9 +16,27 @@ export const PEO_TOOL = {
       missing_info_keys: { 
         type: "ARRAY", 
         items: { type: "STRING" },
-        description: "List of keys from the QUESTION_REGISTRY that are missing."
+        description: "List of keys from the QUESTION_REGISTRY that are essential but missing."
       }
     },
     required: ["question_type", "peo_data", "missing_info_keys"]
   }
 };
+
+export async function callGeminiWithTools(query: string, tool: any) {
+  const apiKey = Deno.env.get("GEMINI_API_KEY");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: query }] }],
+      tools: [{ functionDeclarations: [tool] }],
+      toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: [tool.name] } }
+    }),
+  });
+
+  const data = await response.json();
+  return data.candidates[0].content.parts[0].functionCall.args;
+}
