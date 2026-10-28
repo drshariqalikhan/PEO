@@ -1,59 +1,51 @@
 import { getProvider } from "../llm/index.ts";
 import { calculateReadiness } from "./evaluator.ts";
+import { EXTRACTION_PROMPT } from "./prompts.ts";
 
 export async function analyzeClinicalQuestion(query: string, clarificationAnswers: Record<string, any> = {}) {
   const provider = getProvider();
 
-  const extractionPrompt = `...`; // (Keep your existing prompt string)
+  // 1. Inject data into the prompt
+  const finalPrompt = EXTRACTION_PROMPT
+    .replace("{{query}}", query)
+    .replace("{{context}}", JSON.stringify(clarificationAnswers));
 
-  const rawOutput = await provider.generate(extractionPrompt);
+  // 2. Get LLM response
+  const rawOutput = await provider.generate(finalPrompt);
 
-  // DEFENSIVE CLEANING: Force convert to string and handle potential non-string returns
-  let stringOutput = "";
+  // 3. Defensive Cleaning
+  const stringOutput = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput);
+  const cleanedOutput = stringOutput.replace(/```json/g, "").replace(/```/g, "").trim();
+
+  // 4. Parse JSON safely
+  let parsed;
   try {
-    if (typeof rawOutput === 'string') {
-      stringOutput = rawOutput;
-    } else if (rawOutput && typeof rawOutput === 'object') {
-      stringOutput = JSON.stringify(rawOutput);
-    } else {
-      stringOutput = String(rawOutput);
-    }
+    parsed = JSON.parse(cleanedOutput);
   } catch (e) {
-    stringOutput = "";
+    throw new Error("LLM failed to return valid JSON. Output received: " + cleanedOutput);
   }
 
-  // Use a regex-safe replace
-  const cleanedOutput = stringOutput
-    .replace(/```json/g, "")
-    .replace(/```/g, "")
-    .trim();
-
-  // If after cleaning we have an empty string, throw a descriptive error
-  if (!cleanedOutput) {
-    throw new Error("LLM returned empty or non-string response: " + typeof rawOutput);
+  // 5. Strict Structure Check (The "No Undefined" Safety Gate)
+  if (!parsed.draft_peo || !parsed.draft_peo.patient) {
+    throw new Error("LLM output missing 'draft_peo' structure. Check prompts.ts schema consistency.");
   }
 
+  // 6. Calculate Readiness
+  const { score, missing } = calculateReadiness(parsed.draft_peo);
 
-  // 4. Parse
-  const parsedExtraction = JSON.parse(cleanedOutput);
-
-  // 5. Evaluate Readiness (The "Quality Gate")
-  const { score, missing } = calculateReadiness(parsedExtraction.draft_peo);
-
-  // 6. Logic Gate
+  // 7. Logic Gate
   let final_peo = null;
   let pubmed_queries = null;
 
   if (score >= 85) {
-    final_peo = parsedExtraction.draft_peo;
-    pubmed_queries = await generatePubMedQueries(final_peo, parsedExtraction.question_type);
+    final_peo = parsed.draft_peo;
+    pubmed_queries = await generatePubMedQueries(final_peo, parsed.question_type);
   }
 
-  // 7. Build Response
   return {
-    question_type: parsedExtraction.question_type || "unknown",
+    question_type: parsed.question_type || "unknown",
     search_readiness_score: score,
-    draft_peo: parsedExtraction.draft_peo,
+    draft_peo: parsed.draft_peo,
     missing_fields: missing,
     clarification_questions: score < 85 ? generateClarificationQuestions(missing) : [],
     final_peo,
@@ -61,12 +53,13 @@ export async function analyzeClinicalQuestion(query: string, clarificationAnswer
   };
 }
 
-// --- HELPERS ---
+// --- HELPER FUNCTIONS ---
 
 async function generatePubMedQueries(peo: any, type: string) {
-  const drug = peo.exposure?.required?.drug || "drug";
-  const cond = peo.patient?.required?.condition || "condition";
-  const out = peo.outcome?.required?.primary || "outcome";
+  // Use optional chaining for safety
+  const drug = peo.exposure?.required?.drug || "";
+  const cond = peo.patient?.required?.condition || "";
+  const out = peo.outcome?.required?.primary || "";
   
   return {
     high_precision: `("${drug}") AND ("${cond}") AND ("${out}")`,
@@ -77,6 +70,8 @@ async function generatePubMedQueries(peo: any, type: string) {
 }
 
 function generateClarificationQuestions(missing: any[]) {
+  if (!missing || missing.length === 0) return [];
+  
   return missing.map(m => ({
     id: m.field.replace('.', '_'),
     field: m.field,
