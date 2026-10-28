@@ -1,18 +1,17 @@
 import { getProvider } from "../llm/index.ts";
 import { calculateReadiness } from "./evaluator.ts";
-import { PeoSchema } from "../schema.ts";
 
 export async function analyzeClinicalQuestion(query: string, clarificationAnswers: Record<string, any> = {}) {
   const provider = getProvider();
 
-  // 1. SYSTEM PROMPT: Focused on Extraction
+  // 1. Define the prompt
   const extractionPrompt = `You are a clinical evidence-based medicine assistant.
   Extract the Patient, Exposure, and Outcome (PEO) from the clinical question: "${query}".
   Consider these provided context/answers: ${JSON.stringify(clarificationAnswers)}.
   
-  Output ONLY a JSON object with this structure:
+  Output ONLY a plain JSON object with this exact structure:
   {
-    "question_type": "therapy | harm | prognosis | diagnosis | prevention | screening | etiology",
+    "question_type": "therapy",
     "draft_peo": {
       "patient": { "required": {"condition": ""}, "recommended": {}, "optional": {} },
       "exposure": { "required": {"drug": ""}, "recommended": {}, "optional": {} },
@@ -20,14 +19,21 @@ export async function analyzeClinicalQuestion(query: string, clarificationAnswer
     }
   }`;
 
-  // 2. Perform Extraction
-  const rawExtraction = await provider.generate(extractionPrompt);
-  const parsedExtraction = JSON.parse(rawExtraction);
+  // 2. Get LLM response
+  const rawOutput = await provider.generate(extractionPrompt);
 
-  // 3. Evaluate Readiness (The "Quality Gate")
+  // 3. Robust String Cleaning
+  // Ensure we are working with a string before calling .replace()
+  const stringOutput = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput);
+  const cleanedOutput = stringOutput.replace(/```json/g, "").replace(/```/g, "").trim();
+
+  // 4. Parse
+  const parsedExtraction = JSON.parse(cleanedOutput);
+
+  // 5. Evaluate Readiness (The "Quality Gate")
   const { score, missing } = calculateReadiness(parsedExtraction.draft_peo);
 
-  // 4. Determine Output
+  // 6. Logic Gate
   let final_peo = null;
   let pubmed_queries = null;
 
@@ -36,9 +42,9 @@ export async function analyzeClinicalQuestion(query: string, clarificationAnswer
     pubmed_queries = await generatePubMedQueries(final_peo, parsedExtraction.question_type);
   }
 
-  // 5. Build Final Response Object
+  // 7. Build Response
   return {
-    question_type: parsedExtraction.question_type,
+    question_type: parsedExtraction.question_type || "unknown",
     search_readiness_score: score,
     draft_peo: parsedExtraction.draft_peo,
     missing_fields: missing,
@@ -48,18 +54,21 @@ export async function analyzeClinicalQuestion(query: string, clarificationAnswer
   };
 }
 
-// HELPER: Generate Search Strategies
+// --- HELPERS ---
+
 async function generatePubMedQueries(peo: any, type: string) {
-  // In the future, this can be moved to a separate strategy file
+  const drug = peo.exposure?.required?.drug || "drug";
+  const cond = peo.patient?.required?.condition || "condition";
+  const out = peo.outcome?.required?.primary || "outcome";
+  
   return {
-    high_precision: `("${peo.exposure.required.drug}") AND ("${peo.patient.required.condition}") AND ("${peo.outcome.required.primary}")`,
-    expanded: `("${peo.exposure.required.drug}") AND ("${peo.outcome.required.primary}")`,
-    broad: `("${peo.exposure.required.drug}")`,
-    mesh: `("${peo.exposure.required.drug}"[MeSH Terms]) AND ("${peo.outcome.required.primary}"[MeSH Terms])`
+    high_precision: `("${drug}") AND ("${cond}") AND ("${out}")`,
+    expanded: `("${drug}") AND ("${out}")`,
+    broad: `("${drug}")`,
+    mesh: `("${drug}"[MeSH Terms]) AND ("${out}"[MeSH Terms])`
   };
 }
 
-// HELPER: Generate Clarification Questions
 function generateClarificationQuestions(missing: any[]) {
   return missing.map(m => ({
     id: m.field.replace('.', '_'),
