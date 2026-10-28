@@ -1,5 +1,11 @@
+// Ensure this path is correct relative to the file location
+import { getProvider } from "../llm/index.ts"; 
+import { PeoSchema } from "../schema.ts";
+
+
+
 export async function analyzeClinicalQuestion(query: string, clarificationAnswers: Record<string, any> = {}) {
-  const provider = getProvider();
+    const provider = getProvider();
   
   const systemPrompt = `You are a clinical research assistant.
   Analyze the question: "${query}".
