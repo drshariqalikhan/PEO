@@ -4,28 +4,35 @@ import { calculateReadiness } from "./evaluator.ts";
 export async function analyzeClinicalQuestion(query: string, clarificationAnswers: Record<string, any> = {}) {
   const provider = getProvider();
 
-  // 1. Define the prompt
-  const extractionPrompt = `You are a clinical evidence-based medicine assistant.
-  Extract the Patient, Exposure, and Outcome (PEO) from the clinical question: "${query}".
-  Consider these provided context/answers: ${JSON.stringify(clarificationAnswers)}.
-  
-  Output ONLY a plain JSON object with this exact structure:
-  {
-    "question_type": "therapy",
-    "draft_peo": {
-      "patient": { "required": {"condition": ""}, "recommended": {}, "optional": {} },
-      "exposure": { "required": {"drug": ""}, "recommended": {}, "optional": {} },
-      "outcome": { "required": {"primary": ""}, "recommended": {}, "optional": {} }
-    }
-  }`;
+  const extractionPrompt = `...`; // (Keep your existing prompt string)
 
-  // 2. Get LLM response
   const rawOutput = await provider.generate(extractionPrompt);
 
-  // 3. Robust String Cleaning
-  // Ensure we are working with a string before calling .replace()
-  const stringOutput = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput);
-  const cleanedOutput = stringOutput.replace(/```json/g, "").replace(/```/g, "").trim();
+  // DEFENSIVE CLEANING: Force convert to string and handle potential non-string returns
+  let stringOutput = "";
+  try {
+    if (typeof rawOutput === 'string') {
+      stringOutput = rawOutput;
+    } else if (rawOutput && typeof rawOutput === 'object') {
+      stringOutput = JSON.stringify(rawOutput);
+    } else {
+      stringOutput = String(rawOutput);
+    }
+  } catch (e) {
+    stringOutput = "";
+  }
+
+  // Use a regex-safe replace
+  const cleanedOutput = stringOutput
+    .replace(/```json/g, "")
+    .replace(/```/g, "")
+    .trim();
+
+  // If after cleaning we have an empty string, throw a descriptive error
+  if (!cleanedOutput) {
+    throw new Error("LLM returned empty or non-string response: " + typeof rawOutput);
+  }
+
 
   // 4. Parse
   const parsedExtraction = JSON.parse(cleanedOutput);
