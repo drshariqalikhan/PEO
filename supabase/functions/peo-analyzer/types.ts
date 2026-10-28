@@ -5,7 +5,7 @@ export interface PEOProfile {
   outcome: { required: Record<string, any>; recommended: Record<string, any>; optional: Record<string, any> };
 }
 
-// Define the PubMed search structure
+// Define the PubMed search structures 
 export interface PubMedQueries {
   high_precision: string;
   expanded: string;
