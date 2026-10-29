@@ -1,5 +1,5 @@
 import { callGeminiWithTools } from "../llm/client.ts";
-import { PEO_TOOL } from "../llm/client.ts";
+import { getPEOTool } from "../llm/client.ts";
 import { QUESTION_REGISTRY } from "./registry.ts";
 
 
