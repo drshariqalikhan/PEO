@@ -25,7 +25,7 @@ export const PEO_TOOL = {
 
 export async function callGeminiWithTools(query: string, tool: any) {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
 
   const response = await fetch(url, {
     method: "POST",
