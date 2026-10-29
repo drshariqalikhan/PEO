@@ -1,4 +1,5 @@
 import { QUESTION_REGISTRY } from "../core/registry.ts";
+import { MODEL_LIST } from "./models.ts";
 
 export const getPEOTool = () => ({
   name: "extract_peo",
@@ -25,9 +26,14 @@ export const getPEOTool = () => ({
   }
 });
 
-export async function callGeminiWithTools(query: string, tool: any) {
+export async function callGeminiWithTools(query: string, tool: any, modelIndex = 0) {
+  if (modelIndex >= MODEL_LIST.length) {
+    throw new Error("All Gemini models failed (Rate limits or Deprecation).");
+  }
+
+  const model = MODEL_LIST[modelIndex];
   const apiKey = Deno.env.get("GEMINI_API_KEY");
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const response = await fetch(url, {
     method: "POST",
@@ -40,5 +46,21 @@ export async function callGeminiWithTools(query: string, tool: any) {
   });
 
   const data = await response.json();
+
+  // Handle Model Errors (404 = Not Found, 429 = Rate Limit)
+  if (!response.ok) {
+    const errorStatus = response.status;
+    if (errorStatus === 404 || errorStatus === 429) {
+      console.warn(`Model ${model} failed with ${errorStatus}. Trying next model...`);
+      return callGeminiWithTools(query, tool, modelIndex + 1);
+    }
+    throw new Error(`Gemini API Error: ${JSON.stringify(data)}`);
+  }
+
+  // Handle Logic Errors (if candidates is missing)
+  if (!data.candidates?.[0]?.content?.parts?.[0]?.functionCall) {
+    throw new Error(`Gemini returned unexpected format: ${JSON.stringify(data)}`);
+  }
+
   return data.candidates[0].content.parts[0].functionCall.args;
 }
